@@ -45,13 +45,13 @@ icd_10_code_desc<-readxl::read_excel(temp2,sheet="DX_to_CCSR_Mapping",
   )
   
 
-# Cleaned dataset with ICD-10 codes per PQI and description 
-ahrq_pqi_cleaned_dataset<-files %>%
+# Clean dataset with ICD-10 codes per PQI and description 
+ahrq_pqi_cleaned_dataset<-str_subset(files, "Composite", negate=TRUE) %>%
   map(function(x) pdftools::pdf_text(x) %>%
                   .[3:length(.)] %>%
                   str_extract_all('\\s[A-Z]\\d{2,6}') %>%
                   unlist()) %>% 
-                  setNames(str_remove_all(files,'TechSpecs/|.*/|.pdf')) %>% 
+                  setNames(str_remove_all(str_subset(files, "Composite", negate=TRUE),'TechSpecs/|.*/|.pdf')) %>% 
   map(`length<-`,max(lengths(.))) %>%
                   bind_rows() %>% 
   pivot_longer(cols=starts_with('PQI'),
@@ -63,11 +63,33 @@ ahrq_pqi_cleaned_dataset<-files %>%
          PQI_lab=str_remove_all(PQI,"PQI_\\d{2}_")) %>%
   select(`ICD-10`, PQI_num, PQI_lab) %>%
   merge(icd_10_code_desc, by="ICD-10") 
+
+PQI_composite<-files %>% str_subset("Composite")%>%
+  map(function(x) pdftools::pdf_text(x) %>%
+     str_extract_all("PQI\\s#\\d+") %>%
+     unlist()) %>%
+  setNames(str_remove_all(files %>% str_subset("Composite"),'TechSpecs/|.*/|.pdf')) %>%
+  map(function(x) str_replace_all(x," #","_")) %>%
+  map(`length<-`,max(lengths(.))) %>%
+  bind_rows() %>% pivot_longer(
+    cols = starts_with("PQI"),
+    names_to="Composite",
+    values_to = "PQI_num"
+  ) %>%
+mutate(
+  PQI_Composite = str_extract(Composite,"PQI_\\d{2}"),
+  Composite_label = str_remove_all(Composite,"PQI_\\d{2}_")
+) %>%
+select(PQI_num, PQI_Composite, Composite_label)
+
+ahrq_cleaned_w_composite<-merge(ahrq_pqi_cleaned_dataset, PQI_composite)
+
   
 unlink(temp)
 unlink(temp2)
 
+# Saves an excel copy of the file
 wb<-createWorkbook()
 addWorksheet(wb,sheetName="PQIs")
-writeData(wb, "PQIs", ahrq_pqi_cleaned_dataset)
+writeData(wb, "PQIs", ahrq_cleaned_w_composite)
 saveWorkbook(wb, paste0("ahrqPQIs_v",pqi_year,"_ICD10v",ref_file_year,".xlsx"), overwrite = TRUE)
