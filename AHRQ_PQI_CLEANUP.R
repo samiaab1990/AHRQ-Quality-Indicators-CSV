@@ -7,21 +7,25 @@ library(tidyverse)
 library(janitor)
 library(openxlsx)
 
+
+
+
 # For PQIs
 ## Pulls most recent PQI zipfile from when script is run
 main_pg<-"https://qualityindicators.ahrq.gov/"
-ahrq<-read_html('https://qualityindicators.ahrq.gov/modules/pqi_resources.aspx#techspecs')
-tech_spec<-ahrq %>% html_nodes(".btn-download") %>% html_attr("href") %>%
+pqi_resources<-"https://qualityindicators.ahrq.gov/modules/pqi_resources.aspx#techspecs"
+pqi_resources_html<-read_html(pqi_resources)
+tech_spec<-pqi_resources_html %>% html_nodes(".btn-download") %>% html_attr("href") %>%
   str_subset("TechSpec")
-pqi_page<-read_html(paste0(main_pg,tech_spec))
+pqi_pdf_page<-read_html(paste0(main_pg,tech_spec))
 
-zip_file<-paste0(main_pg,str_remove_all(pqi_page %>% html_nodes(".btn-download") %>% html_attr("href"),
+zip_file<-paste0(main_pg,str_remove_all(pqi_pdf_page %>% html_nodes(".btn-download") %>% html_attr("href"),
                                         "^[^/]+/"))
 
 pqi_year<-zip_file %>% str_extract('\\d{4}')
 
 temp <- tempfile()
-download.file(zip_file, temp, mode="wb")
+download.file(zip_file, temp, mode="wb", cacheOK=FALSE)
 files<-str_remove_all(unzip(temp),"^[^/]+/")
 
 # For ICD_10 CM description
@@ -33,7 +37,7 @@ ref_file<-ccsr %>% html_nodes("a") %>% html_attr("href") %>% str_subset("Referen
 ref_file_year<-ref_file %>% str_extract('\\d{4}')
 
 temp2<-tempfile()
-download.file(paste0("https://www.hcup-us.ahrq.gov/toolssoftware/ccsr/",ref_file),temp2, mode="wb")
+download.file(paste0("https://www.hcup-us.ahrq.gov/toolssoftware/ccsr/",ref_file),temp2, mode="wb", cacheOK=FALSE)
 icd_10_code_desc<-readxl::read_excel(temp2,sheet="DX_to_CCSR_Mapping",
                                      col_names = FALSE) %>%
                                      tail(-1) %>%
@@ -42,27 +46,60 @@ icd_10_code_desc<-readxl::read_excel(temp2,sheet="DX_to_CCSR_Mapping",
   rename(
     `ICD-10` = `ICD-10-CM Code`,
     `ICD-10-label` = `ICD-10-CM Code Description` 
-  )
+  ) %>%
+  distinct(.keep_all=TRUE)
   
 
+# For ICD-10 PCS codes
+url3<-'https://www.hcup-us.ahrq.gov/toolssoftware/ccs10/ccs10.jsp'
+css10<-read_html(url3)
+css10_recent_zip<-css10 %>% html_nodes("a") %>% html_attr("href") %>% str_subset("ccs_pr_icd10pcs") %>%
+head(1)
+
+temp3<-tempfile()
+download.file(paste0('https://www.hcup-us.ahrq.gov/toolssoftware/ccs10/',css10_recent_zip), temp3, mode="wb", cacheOK=FALSE)
+icd10_pcs<-read.csv(unzip(temp3, str_replace(css10_recent_zip,'.zip','.csv'))) %>%
+  rename(`ICD-10-PCS` = "X.ICD.10.PCS.CODE.",
+         `ICD-10-PCS-label`= "X.ICD.10.PCS.CODE.DESCRIPTION.",
+         `ICD-10-PCS-category`="X.CCS.CATEGORY.DESCRIPTION.") %>%
+  select(`ICD-10-PCS`, `ICD-10-PCS-label`, `ICD-10-PCS-category`) %>% 
+  mutate(`ICD-10-PCS` = str_remove_all(`ICD-10-PCS`, "'"))
+
+
+# For code sets 
+temp4<-tempfile()
+code_set_link<-read_html(paste0(main_pg, pqi_resources_html %>% html_nodes("a") %>% html_attr("href") %>% str_subset("Coding") %>% head(1))) %>%
+html_nodes("a") %>% html_attr("href") %>% str_subset(".xlsx")
+download.file(paste0(main_pg,str_remove_all(code_set_link,"^[.]{2}+/")), temp4, mode="wb", cacheOK=FALSE)
+classification<-readxl::read_excel(temp4, sheet='Code set changes and content') %>% 
+  filter(str_detect(`Code Set Value`,'[A-Z0-9]{3,7}'),
+         !!as.symbol(paste0("Mapped Value v",pqi_year))=="1") %>%
+  select(`Code Set Name`, `Code Set Value`) %>%
+  rename(
+    Classification = `Code Set Name`,
+    `ICD-10` = `Code Set Value`
+  )
+
+
 # Clean dataset with ICD-10 codes per PQI and description 
-ahrq_pqi_cleaned_dataset<-str_subset(files, "Composite", negate=TRUE) %>%
+ahrq_pqi_cleaned_dataset<-str_subset(files, "Composite|Appendix", negate=TRUE) %>%
   map(function(x) pdftools::pdf_text(x) %>%
-                  .[3:length(.)] %>%
-                  str_extract_all('\\s[A-Z]\\d{2,6}') %>%
+                  str_extract_all('\\s[A-Z]{1}+\\d{1}+[A-Z0-9]{1,5}') %>%
                   unlist()) %>% 
-                  setNames(str_remove_all(str_subset(files, "Composite", negate=TRUE),'TechSpecs/|.*/|.pdf')) %>% 
+                  setNames(str_remove_all(str_subset(files, "Composite|Appendix", negate=TRUE),'TechSpecs/|.*/|.pdf')) %>% 
   map(`length<-`,max(lengths(.))) %>%
                   bind_rows() %>% 
   pivot_longer(cols=starts_with('PQI'),
                names_to="PQI",
                values_to="ICD-10") %>%
   filter(!is.na(`ICD-10`)) %>%
-  mutate(`ICD-10` = str_remove_all(`ICD-10`,"\n"),
+  mutate(`ICD-10`= str_remove_all(`ICD-10`,"\n|\\s"),
          PQI_num=str_extract(PQI,"PQI_\\d{2}"),
-         PQI_lab=str_remove_all(PQI,"PQI_\\d{2}_")) %>%
+         PQI_lab=str_remove_all(PQI,"PQI_\\d{2}_")) %>% 
   select(`ICD-10`, PQI_num, PQI_lab) %>%
-  merge(icd_10_code_desc, by="ICD-10") 
+  left_join(icd_10_code_desc, by="ICD-10") %>%
+  left_join(classification, by="ICD-10")
+       
 
 PQI_composite<-files %>% str_subset("Composite")%>%
   map(function(x) pdftools::pdf_text(x) %>%
@@ -80,16 +117,33 @@ mutate(
   PQI_Composite = str_extract(Composite,"PQI_\\d{2}"),
   Composite_label = str_remove_all(Composite,"PQI_\\d{2}_")
 ) %>%
-select(PQI_num, PQI_Composite, Composite_label)
+select(PQI_num, PQI_Composite, Composite_label) %>%
+filter(!is.na(PQI_num))
 
-ahrq_cleaned_w_composite<-merge(ahrq_pqi_cleaned_dataset, PQI_composite)
+ahrq_cleaned_w_composite<-left_join(ahrq_pqi_cleaned_dataset, PQI_composite)
 
-  
-unlink(temp)
-unlink(temp2)
+icd_procedures_exclusions<-str_subset(files, "Composite", negate=TRUE) %>%
+  map(function(x) pdftools::pdf_text(x) %>%
+        str_extract_all('\\s[A-Z0-9]{7}')) %>%
+  unlist() %>% 
+  str_subset('[A-Z]{7}', negate=TRUE) %>%
+  str_subset('\\d{7}', negate=TRUE) %>%
+  str_remove('\n|\\s') %>% 
+  str_subset(paste(ahrq_pqi_cleaned_dataset %>% select(`ICD-10`) %>% distinct() %>% pull(), collapse="|"), negate=TRUE) %>%
+  tibble() %>%  
+  rename(.,`ICD-10-PCS`=.) %>% 
+  left_join(icd10_pcs) %>%
+  left_join(classification, by=c("ICD-10-PCS"="ICD-10"))
+
+ 
+c(temp,temp2,temp3,temp4) %>%
+  map(unlink)
+
 
 # Saves an excel copy of the file
 wb<-createWorkbook()
-addWorksheet(wb,sheetName="PQIs")
-writeData(wb, "PQIs", ahrq_cleaned_w_composite)
+addWorksheet(wb,sheetName="PQI_ICD_CM")
+addWorksheet(wb,sheetName="PQI_ICD_PCS")
+writeData(wb, "PQI_ICD_CM", ahrq_cleaned_w_composite)
+writeData(wb,"PQI_ICD_PCS",icd_procedures_exclusions)
 saveWorkbook(wb, paste0("ahrqPQIs_v",pqi_year,"_ICD10v",ref_file_year,".xlsx"), overwrite = TRUE)
