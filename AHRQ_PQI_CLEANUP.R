@@ -5,10 +5,7 @@ library(pdftools)
 library(tesseract)
 library(tidyverse)
 library(janitor)
-library(openxlsx)
-
-
-
+library(utils)
 
 # For PQIs
 ## Pulls most recent PQI zipfile from when script is run
@@ -25,7 +22,7 @@ zip_file<-paste0(main_pg,str_remove_all(pqi_pdf_page %>% html_nodes(".btn-downlo
 pqi_year<-zip_file %>% str_extract('\\d{4}')
 
 temp <- tempfile()
-download.file(zip_file, temp, mode="wb", cacheOK=FALSE)
+download.file(zip_file, temp, mode="wb")
 files<-str_remove_all(unzip(temp),"^[^/]+/")
 
 # For ICD_10 CM description
@@ -37,7 +34,7 @@ ref_file<-ccsr %>% html_nodes("a") %>% html_attr("href") %>% str_subset("Referen
 ref_file_year<-ref_file %>% str_extract('\\d{4}')
 
 temp2<-tempfile()
-download.file(paste0("https://www.hcup-us.ahrq.gov/toolssoftware/ccsr/",ref_file),temp2, mode="wb", cacheOK=FALSE)
+download.file(paste0("https://www.hcup-us.ahrq.gov/toolssoftware/ccsr/",ref_file),temp2, mode="wb", exdir=FALSE)
 icd_10_code_desc<-readxl::read_excel(temp2,sheet="DX_to_CCSR_Mapping",
                                      col_names = FALSE) %>%
                                      tail(-1) %>%
@@ -56,9 +53,11 @@ css10<-read_html(url3)
 css10_recent_zip<-css10 %>% html_nodes("a") %>% html_attr("href") %>% str_subset("ccs_pr_icd10pcs") %>%
 head(1)
 
+pcs_year<-css10_recent_zip %>% str_extract('\\d{4}')
+
 temp3<-tempfile()
-download.file(paste0('https://www.hcup-us.ahrq.gov/toolssoftware/ccs10/',css10_recent_zip), temp3, mode="wb", cacheOK=FALSE)
-icd10_pcs<-read.csv(unzip(temp3, str_replace(css10_recent_zip,'.zip','.csv'))) %>%
+download.file(paste0('https://www.hcup-us.ahrq.gov/toolssoftware/ccs10/',css10_recent_zip), temp3, mode="wb")
+icd10_pcs<-read.csv(unz(temp3, str_replace(css10_recent_zip,'.zip','.csv'))) %>%
   rename(`ICD-10-PCS` = "X.ICD.10.PCS.CODE.",
          `ICD-10-PCS-label`= "X.ICD.10.PCS.CODE.DESCRIPTION.",
          `ICD-10-PCS-category`="X.CCS.CATEGORY.DESCRIPTION.") %>%
@@ -70,7 +69,8 @@ icd10_pcs<-read.csv(unzip(temp3, str_replace(css10_recent_zip,'.zip','.csv'))) %
 temp4<-tempfile()
 code_set_link<-read_html(paste0(main_pg, pqi_resources_html %>% html_nodes("a") %>% html_attr("href") %>% str_subset("Coding") %>% head(1))) %>%
 html_nodes("a") %>% html_attr("href") %>% str_subset(".xlsx")
-download.file(paste0(main_pg,str_remove_all(code_set_link,"^[.]{2}+/")), temp4, mode="wb", cacheOK=FALSE)
+download.file(paste0(main_pg,str_remove_all(code_set_link,"^[.]{2}+/")), temp4, mode="wb")
+
 classification<-readxl::read_excel(temp4, sheet='Code set changes and content') %>% 
   filter(str_detect(`Code Set Value`,'[A-Z0-9]{3,7}'),
          !!as.symbol(paste0("Mapped Value v",pqi_year))=="1") %>%
@@ -140,10 +140,6 @@ c(temp,temp2,temp3,temp4) %>%
   map(unlink)
 
 
-# Saves an excel copy of the file
-wb<-createWorkbook()
-addWorksheet(wb,sheetName="PQI_ICD_CM")
-addWorksheet(wb,sheetName="PQI_ICD_PCS")
-writeData(wb, "PQI_ICD_CM", ahrq_cleaned_w_composite)
-writeData(wb,"PQI_ICD_PCS",icd_procedures_exclusions)
-saveWorkbook(wb, paste0("ahrqPQIs_v",pqi_year,"_ICD10v",ref_file_year,".xlsx"), overwrite = TRUE)
+# creates a csv copy of file
+write.csv2(ahrq_cleaned_w_composite, paste0("ahrqPQIs_v",pqi_year,"_ICD10v",ref_file_year,".csv"))
+write.csv2(icd_procedures_exclusions, paste0("ahrqPQIs_v",pqi_year,"ICD10PCSv",pcs_year,".csv"))
