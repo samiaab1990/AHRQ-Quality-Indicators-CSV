@@ -71,12 +71,12 @@ code_set_link<-read_html(paste0(main_pg, pqi_resources_html %>% html_nodes("a") 
 html_nodes("a") %>% html_attr("href") %>% str_subset(".xlsx")
 download.file(paste0(main_pg,str_remove_all(code_set_link,"^[.]{2}+/")), temp4, mode="wb")
 
-diagnosis_code_set_name<-readxl::read_excel(temp4, sheet='Code set changes and content') %>% 
+code_set_name<-readxl::read_excel(temp4, sheet='Code set changes and content') %>% 
   filter(str_detect(`Code Set Value`,'[A-Z0-9]{3,7}'),
          !!as.symbol(paste0("Mapped Value v",pqi_year))=="1") %>%
   select(`Code Set Name`, `Code Set Value`) %>%
   rename(
-    diagnosis_code_set_name = `Code Set Name`,
+    code_set_name = `Code Set Name`,
     `ICD-10` = `Code Set Value`
   )
 
@@ -98,7 +98,7 @@ ahrq_pqi_cleaned_dataset<-str_subset(files, "Composite|Appendix", negate=TRUE) %
          PQI_lab=str_remove_all(PQI,"PQI_\\d{2}_")) %>% 
   select(`ICD-10`, PQI_num, PQI_lab) %>%
   left_join(icd_10_code_desc, by="ICD-10") %>%
-  left_join(diagnosis_code_set_name, by="ICD-10")
+  left_join(code_set_name, by="ICD-10")
        
 
 PQI_composite<-files %>% str_subset("Composite")%>%
@@ -133,7 +133,7 @@ icd_procedures_exclusions<-str_subset(files, "Composite", negate=TRUE) %>%
   tibble() %>%  
   rename(.,`ICD-10-PCS`=.) %>% 
   left_join(icd10_pcs) %>%
-  left_join(diagnosis_code_set_name, by=c("ICD-10-PCS"="ICD-10"))
+  left_join(code_set_name, by=c("ICD-10-PCS"="ICD-10"))
 
  
 c(temp,temp2,temp3,temp4) %>%
