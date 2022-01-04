@@ -141,5 +141,5 @@ c(temp,temp2,temp3,temp4) %>%
 
 
 # creates a csv copy of file
-write_csv(ahrq_cleaned_w_composite, paste0("ahrqPQIs_v",pqi_year,"_ICD10v",ref_file_year,".csv"))
-write_csv(icd_procedures_exclusions, paste0("ahrqPQIs_v",pqi_year,"ICD10PCSv",pcs_year,".csv"))
+write_csv(ahrq_cleaned_w_composite, paste0("./CSV/PQIs/ahrqPQIs_v",pqi_year,"_ICD10v",ref_file_year,".csv"))
+write_csv(icd_procedures_exclusions, paste0("./CSV/PQIs/ahrqPQIs_v",pqi_year,"ICD10PCSv",pcs_year,".csv"))
